@@ -4,17 +4,23 @@
 #include <unordered_map>
 #include <optional>
 
+using namespace std;
+
 class KVStore
 {
 public:
-  KVStore();
+  KVStore(const string& filename);
 
   ~KVStore();
 
-  void Put(const std::string& key, const std::string& value);
+  void Put(const string& key, const string& value);
 
-  std::optional<std::string> Get(const std::string& key);
+  optional<string> Get(const string& key);
 
 private:
-  std::unordered_map<std::string, std::string> store;
+  unordered_map<string, string> store;
+  string filename_;
+
+  void LoadFromFile();
+  void SaveToFile();
 };
