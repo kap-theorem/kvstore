@@ -2,22 +2,40 @@
 #include <iostream>
 #include <fstream>
 #include "utils/string_utils.h"
+#include <chrono>
 
 using namespace std;
 
 KVStore::KVStore(const string& filename) {
     cout << "Memory Initialised\n";
     this->filename_ = filename;
-    LoadFromFile();
+
+    this->filename_ = filename;
+    
+    // Open the file for reading and writing in binary mode
+    file_stream_.open(filename_, ios::in | ios::out | ios::binary);
+    
+    // If file doesn't exist, create it
+    if (!file_stream_.is_open()) {
+        file_stream_.clear();
+        file_stream_.open(filename_, ios::out | ios::binary);
+        file_stream_.close();
+        file_stream_.open(filename_, ios::in | ios::out | ios::binary);
+    }
+    
+    LoadFromLog();
+    
+    LoadFromLog();
 }
 
 KVStore::~KVStore() {
     cout << "Memory Destroyed\n";
-    SaveToFile();
+    // SaveToFile();
 }
 
 void KVStore::Put(const string& key, const string& value) {
     store.insert({key, value});
+    AppendLog(key, value);
 }
 
 optional<string> KVStore::Get(const string& key) {
@@ -29,37 +47,69 @@ optional<string> KVStore::Get(const string& key) {
     return store[key];
 }
 
-void KVStore::LoadFromFile() {
-    ifstream file(filename_);
+uint32_t KVStore::CalculateCheckSum(const string& key, const string& value) {
+    uint32_t hash = 5381;
 
-    if (!file.is_open()) {
-        cout << "File not present\n";
-    } else {
-        string key, value;
-        while (file >> key) {
-            getline(file, value);
-
-            // Cleaning the I\Ps
-            key = kvstore::utils::Trim(key);
-            value = kvstore::utils::Trim(value);
-            store.insert({key, value});
-        }
+    for (char c: key) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    for (char c: value) {
+        hash = ((hash << 5) + hash) + c;
     }
 
-    file.close();
+    return hash;
 }
 
-void KVStore::SaveToFile() {
-    ofstream file(filename_);
+void KVStore::AppendLog(const string& key, const string& value) {
+    LogHeader header;
+    header.key_size = key.size();
+    header.value_size = value.size();
 
-    if (file.is_open()) {
-        for (const auto& pair: store) {
-            file << pair.first << " " << pair.second << endl;
+    auto now = chrono::system_clock::now();
+    header.timestamp = chrono::duration_cast<chrono::seconds>(now.time_since_epoch()).count();
+
+    header.checksum = CalculateCheckSum(key, value);
+
+    file_stream_.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
+
+    file_stream_.write(key.c_str(), header.key_size);
+    file_stream_.write(value.c_str(), header.value_size);
+
+    file_stream_.flush();
+}
+
+void KVStore::LoadFromLog() {
+    file_stream_.seekg(0, ios::beg);
+
+    while (true) {
+        LogHeader header;
+
+        file_stream_.read(reinterpret_cast<char*>(&header), sizeof(LogHeader));
+
+        if (file_stream_.eof()) break;
+        
+        if (file_stream_.gcount() != sizeof(LogHeader)) {
+            cout << "Warning, Partial header read, log may be truncated" << endl;
+            break;
         }
 
-        file.close();
-        cout << "Data saved to " << filename_ << endl;
-    } else {
-        cout << "Error in opening file" << endl;
+        string key(header.key_size, '\0');
+        file_stream_.read(&key[0], header.key_size);
+
+        string value(header.value_size, '\0');
+        file_stream_.read(&value[0], header.value_size);
+
+        uint32_t calculated_checksum = CalculateCheckSum(key, value);
+        if (calculated_checksum != header.checksum) {
+            cout << "CRITICAL ERROR: Checksum not matching" << endl;
+            cout << "Stopping ;pg replay at safe point" << endl;
+            break;
+        }
+
+        store[key] = value;
     }
+
+    file_stream_.clear();
+    file_stream_.seekp(0, ios::end);
+    cout << "Successfully loaded and verified " << store.size() << " records." << endl;
 }
