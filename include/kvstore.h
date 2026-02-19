@@ -22,12 +22,11 @@ class KVStore
 {
 public:
   KVStore(const string& filename);
-
   ~KVStore();
 
   void Put(const string& key, const string& value);
-
   optional<string> Get(const string& key);
+  void Compact();
 
 private:
   unordered_map<string, string> store;
