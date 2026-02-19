@@ -24,13 +24,13 @@ KVStore::KVStore(const string& filename) {
     }
     
     LoadFromLog();
-    
-    LoadFromLog();
 }
 
 KVStore::~KVStore() {
     cout << "Memory Destroyed\n";
-    // SaveToFile();
+    if (file_stream_.is_open()) {
+        file_stream_.close();
+    }
 }
 
 void KVStore::Put(const string& key, const string& value) {
