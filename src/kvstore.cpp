@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include "utils/string_utils.h"
+#include "utils/stream_utils.h"
 #include <chrono>
 
 using namespace std;
@@ -72,21 +73,28 @@ void KVStore::AppendLog(const string& key, const string& value) {
     header.checksum = CalculateCheckSum(key, value);
 
     file_stream_.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
+    { StreamGaurd(file_stream_, "write header"); }
 
     file_stream_.write(key.c_str(), header.key_size);
+    { StreamGaurd(file_stream_, "write key"); }
+
     file_stream_.write(value.c_str(), header.value_size);
+    { StreamGaurd(file_stream_, "write value"); }
 
     file_stream_.flush();
+    { StreamGaurd(file_stream_, "Flush"); }
 }
 
 void KVStore::LoadFromLog() {
     file_stream_.seekg(0, ios::beg);
+    { StreamGaurd(file_stream_, "seek to beginning"); }
 
     while (true) {
         LogHeader header;
 
         // Read the header
         file_stream_.read(reinterpret_cast<char*>(&header), sizeof(LogHeader));
+        { StreamGaurd(file_stream_, "read header"); }
 
         // If we hit the end of file, stop reading
         if (file_stream_.eof()) break;
@@ -100,9 +108,11 @@ void KVStore::LoadFromLog() {
         // Reading key and value from the header
         string key(header.key_size, '\0');
         file_stream_.read(&key[0], header.key_size);
+        { StreamGaurd(file_stream_, "read key"); }
 
         string value(header.value_size, '\0');
         file_stream_.read(&value[0], header.value_size);
+        { StreamGaurd(file_stream_, "read value"); }
 
         // Verify checksum
         uint32_t calculated_checksum = CalculateCheckSum(key, value);
@@ -117,6 +127,7 @@ void KVStore::LoadFromLog() {
 
     file_stream_.clear();
     file_stream_.seekp(0, ios::end);
+    { StreamGaurd(file_stream_, "Seek to end for appending"); }
     cout << "Successfully loaded and verified " << store.size() << " records." << endl;
 }
 
@@ -141,6 +152,7 @@ void KVStore::Compact() {
         header.checksum = CalculateCheckSum(key, value);
 
         tmp_file.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
+
         tmp_file.write(key.c_str(), header.key_size);
         tmp_file.write(value.c_str(), header.value_size);
     }
