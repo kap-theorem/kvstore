@@ -6,14 +6,15 @@
 
 using namespace std;
 
+template <typename StreamType>
 class StreamGaurd {
 
 private:
-    fstream& stream_;
+    StreamType& stream_;
     string operation_;
 
 public:
-    StreamGaurd(fstream& stream, string op)
+    StreamGaurd(StreamType& stream, string op)
         : stream_(stream), operation_(move(op)) {}
 
     ~StreamGaurd() {

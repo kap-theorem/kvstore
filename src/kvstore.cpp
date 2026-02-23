@@ -20,8 +20,16 @@ KVStore::KVStore(const string& filename) {
     if (!file_stream_.is_open()) {
         file_stream_.clear();
         file_stream_.open(filename_, ios::out | ios::binary);
+        if (!file_stream_.is_open()) {
+            throw runtime_error("Failed to create file: " + filename_);
+        }
+
         file_stream_.close();
         file_stream_.open(filename_, ios::in | ios::out | ios::binary);
+
+        if (!file_stream_.is_open()) {
+            throw runtime_error("Failed to open newly created file: " + filename_);
+        }
     }
     
     LoadFromLog();
@@ -30,6 +38,7 @@ KVStore::KVStore(const string& filename) {
 KVStore::~KVStore() {
     cout << "Memory Destroyed\n";
     if (file_stream_.is_open()) {
+        file_stream_.flush();
         file_stream_.close();
     }
 }
@@ -152,12 +161,17 @@ void KVStore::Compact() {
         header.checksum = CalculateCheckSum(key, value);
 
         tmp_file.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
+        { StreamGaurd(tmp_file, "Compaction: failed to write header"); }
 
         tmp_file.write(key.c_str(), header.key_size);
+        { StreamGaurd(tmp_file, "Compaction: failed to write key"); }
+
         tmp_file.write(value.c_str(), header.value_size);
+        { StreamGaurd(tmp_file, "Compaction: failed to write value"); }
     }
 
     tmp_file.flush();
+    { StreamGaurd(tmp_file, "Compaction: failed to flush"); }
     tmp_file.close();
     
     if (file_stream_.is_open()) {
