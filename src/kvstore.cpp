@@ -33,9 +33,22 @@ KVStore::KVStore(const string& filename) {
     }
     
     LoadFromLog();
+
+    background_writer_ = std::thread(&KVStore::BackgroundWriterLoop, this);
 }
 
 KVStore::~KVStore() {
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        stop_thread_ = true;
+    }
+
+    cv_.notify_one();
+
+    if (background_writer_.joinable()) {
+        background_writer_.join();
+    }
+
     cout << "Memory Destroyed\n";
     if (file_stream_.is_open()) {
         file_stream_.flush();
@@ -44,12 +57,18 @@ KVStore::~KVStore() {
 }
 
 void KVStore::Put(const string& key, const string& value) {
-    // store.insert({key, value});
+    std::lock_guard<std::mutex> lock(mtx_);
+
     store[key] = value;
-    AppendLog(key, value);
+
+    pending_writes_.push_back(WriteOp{key, value});
+
+    cv_.notify_one();
 }
 
 optional<string> KVStore::Get(const string& key) {
+    std::lock_guard<std::mutex> lock(mtx_);
+
     if (store.find(key) == store.end()) {
         std::cout << key << " is no† present :(\n";
         return std::nullopt;
@@ -71,27 +90,43 @@ uint32_t KVStore::CalculateCheckSum(const string& key, const string& value) {
     return hash;
 }
 
-void KVStore::AppendLog(const string& key, const string& value) {
-    LogHeader header;
-    header.key_size = key.size();
-    header.value_size = value.size();
+void KVStore::BackgroundWriterLoop() {
+    std::vector<WriteOp> batch;
 
-    auto now = chrono::system_clock::now();
-    header.timestamp = chrono::duration_cast<chrono::seconds>(now.time_since_epoch()).count();
+    while (true) {
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
 
-    header.checksum = CalculateCheckSum(key, value);
+            cv_.wait(lock, [this]() {
+                return !pending_writes_.empty() || stop_thread_;
+            });
 
-    file_stream_.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
-    { StreamGaurd(file_stream_, "write header"); }
+            if (stop_thread_ && pending_writes_.empty()) {
+                break;
+            }
 
-    file_stream_.write(key.c_str(), header.key_size);
-    { StreamGaurd(file_stream_, "write key"); }
+            batch.swap(pending_writes_);
+        }
 
-    file_stream_.write(value.c_str(), header.value_size);
-    { StreamGaurd(file_stream_, "write value"); }
+        for (const auto& op : batch) {
+            LogHeader header;
+            header.value_size = op.value.size();
+            header.key_size = op.key.size();
 
-    file_stream_.flush();
-    { StreamGaurd(file_stream_, "Flush"); }
+            auto now = std::chrono::system_clock::now();
+            header.timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+            header.checksum = CalculateCheckSum(op.key, op.value);
+
+            file_stream_.write(reinterpret_cast<const char*>(&header), sizeof(LogHeader));
+            file_stream_.write(op.key.c_str(), header.key_size);
+            file_stream_.write(op.value.c_str(), header.value_size);
+        }
+
+        if (!batch.empty()) {
+            file_stream_.flush();
+            batch.clear();
+        }
+    }
 }
 
 void KVStore::LoadFromLog() {

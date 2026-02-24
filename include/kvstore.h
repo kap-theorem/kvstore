@@ -5,6 +5,9 @@
 #include <optional>
 #include <cstdint>
 #include <fstream>
+#include <condition_variable>
+#include <thread>
+#include <mutex> 
 
 using namespace std;
 
@@ -33,8 +36,20 @@ private:
   string filename_;
   fstream file_stream_;
 
+  struct WriteOp {
+    std::string key;
+    std::string value;
+  };
+
+  std::vector<WriteOp> pending_writes_;  // Queue for holding pending writes
+  std::mutex mtx_;  // Used for protecting the map and queue
+  std::condition_variable cv_;  // waking up the background thread
+  std::thread background_writer_; // worker thread
+  bool stop_thread_;  // flag to shutdown
+
   void LoadFromLog();
-  void AppendLog(const string& key, const string& value);
+
+  void BackgroundWriterLoop();
 
   uint32_t CalculateCheckSum(const string& key, const string& value);
 };
